@@ -50,7 +50,7 @@ public class Circle : MonoBehaviour
 
     public void ReceiveHp(float hpReceived)
     {
-        Health += hpReceived;
-        Health = Mathf.Clamp(Health, 0, BaseHealth);
+        float newHealth = Health + hpReceived;
+        Health = Mathf.Clamp(newHealth, 0, BaseHealth);
     }
 }
