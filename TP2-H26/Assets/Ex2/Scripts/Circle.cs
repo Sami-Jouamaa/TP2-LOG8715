@@ -15,11 +15,13 @@ public class Circle : MonoBehaviour
 
     private const float HealingPerSecond = 1;
     private const float HealingRange = 3;
+    private GridShape grid;
 
     // Start is called before the first frame update
     private void Start()
     {
         Health = BaseHealth;
+        grid = GameObject.FindFirstObjectByType<GridShape>(); // find grid once
     }
 
     // Update is called once per frame
@@ -31,7 +33,7 @@ public class Circle : MonoBehaviour
 
     private void UpdateColor()
     {
-        var grid = GameObject.FindFirstObjectByType<GridShape>();
+        // var grid = GameObject.FindFirstObjectByType<GridShape>();
         var spriteRenderer = gameObject.GetComponent<SpriteRenderer>();
         spriteRenderer.color = grid.Colors[i, j] * Health / BaseHealth;
     }
