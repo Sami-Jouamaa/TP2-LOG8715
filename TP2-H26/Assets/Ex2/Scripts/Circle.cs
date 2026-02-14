@@ -1,3 +1,4 @@
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -16,12 +17,13 @@ public class Circle : MonoBehaviour
     private const float HealingPerSecond = 1;
     private const float HealingRange = 3;
     private GridShape grid;
-
+    private Circle[] nearbyCircles; // array of unchanging nearby circles, instead of searching them every frame.
     // Start is called before the first frame update
     private void Start()
     {
         Health = BaseHealth;
         grid = GameObject.FindFirstObjectByType<GridShape>(); // find grid once
+        nearbyCircles = Physics2D.OverlapCircleAll(transform.position, HealingRange).Select(collider => collider.GetComponent<Circle>()).ToArray(); // find nearby circles once
     }
 
     // Update is called once per frame
@@ -40,13 +42,9 @@ public class Circle : MonoBehaviour
 
     private void HealNearbyShapes()
     {
-        var nearbyColliders = Physics2D.OverlapCircleAll(transform.position, HealingRange);
-        foreach (var nearbyCollider in nearbyColliders)
+        foreach (Circle circle in nearbyCircles)
         {
-            if (nearbyCollider != null && nearbyCollider.TryGetComponent<Circle>(out var circle))
-            {
-                circle.ReceiveHp(HealingPerSecond * Time.deltaTime);
-            }
+            circle.ReceiveHp(HealingPerSecond * Time.deltaTime);
         }
     }
 
