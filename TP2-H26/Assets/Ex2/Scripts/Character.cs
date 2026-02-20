@@ -13,10 +13,22 @@ public class Character : MonoBehaviour
     private const float DamagePerSecond = 50;
 
     private const float DamageRange = 10;
+    private const int MaxCircles = (int)(DamageRange*DamageRange*4 + 0.5);
+    private ContactFilter2D collisionFilter;
+    private Collider2D[] colliders = new Collider2D[MaxCircles];
+    private int colliderCount;
+    private Circle[] nearbyCircles = new Circle[MaxCircles];
+    private GridShape grid;
+    private void Start()
+    {
+        grid = FindFirstObjectByType<GridShape>();
+    }
 
     private void Update()
     {
         Move();
+
+        findNearbyCircle();
         DamageNearbyShapes();
         UpdateAcceleration();
     }
@@ -33,34 +45,47 @@ public class Character : MonoBehaviour
 
     private void UpdateAcceleration()
     {
-        var direction = Vector3.zero;
-        var nearbyColliders = Physics2D.OverlapCircleAll(transform.position, DamageRange);
-        foreach (var nearbyCollider in nearbyColliders)
+        float directionX = 0;
+        float directionY = 0;
+        Vector3 tPos = transform.position;
+        float transformDiffX = tPos.x - grid._width / 2f;
+        float transformDiffY = tPos.y - grid._height / 2f;
+
+        for (int i = 0; i < colliderCount; i++)
         {
-            if (nearbyCollider.TryGetComponent<Circle>(out var circle))
-            {
-                direction += (circle.transform.position - transform.position) * circle.Health;
-            }
+            Circle circle = nearbyCircles[i];
+            directionX += (circle.i - transformDiffX) * circle.Health;
+            directionY += (circle.j - transformDiffY) * circle.Health;
+            
         }
-        _acceleration = direction.normalized * AccelerationMagnitude;
+        _acceleration.x = directionX;
+        _acceleration.y = directionY;
+        _acceleration = _acceleration.normalized * AccelerationMagnitude;
     }
 
     private void DamageNearbyShapes()
     {
-        var nearbyColliders = Physics2D.OverlapCircleAll(transform.position, DamageRange);
-
         // Si aucun cercle proche, on retourne a (0,0,0)
-        if (nearbyColliders.Length == 0)
+        if (colliderCount == 0)
         {
             transform.position = Vector3.zero;
+            return;
+        }
+        float healthChange = -DamagePerSecond * Time.deltaTime;
+        for (int i = 0; i < colliderCount; i++)
+        {
+            nearbyCircles[i].ReceiveHp(healthChange);
         }
 
-        foreach(var nearbyCollider in nearbyColliders)
+    }
+
+    private void findNearbyCircle()
+    {
+        // find nearby circles once every frame
+        colliderCount = Physics2D.OverlapCircle(transform.position, DamageRange, collisionFilter.NoFilter(), colliders);
+        for (int i = 0; i < colliderCount; i++)
         {
-            if (nearbyCollider.TryGetComponent<Circle>(out var circle))
-            {
-                circle.ReceiveHp(-DamagePerSecond * Time.deltaTime);
-            }
+            nearbyCircles[i] = colliders[i].GetComponent<Circle>();
         }
     }
 }

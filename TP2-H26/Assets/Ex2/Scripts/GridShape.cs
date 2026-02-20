@@ -11,8 +11,8 @@ public class GridShape : MonoBehaviour
 
     public Color[,] Colors { get; private set; }
 
-    private int _width;
-    private int _height;
+    public int _width;
+    public int _height;
 
     // Start is called before the first frame update
     private void Start()
