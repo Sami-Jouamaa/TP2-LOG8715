@@ -19,6 +19,7 @@ public class Circle : MonoBehaviour
     private GridShape grid;
     private SpriteRenderer spriteRenderer;
     private Circle[] nearbyCircles; // array of unchanging nearby circles, instead of searching them every frame.
+    private float scaledHealing;
     // Start is called before the first frame update
     private void Start()
     {
@@ -26,6 +27,7 @@ public class Circle : MonoBehaviour
         grid = FindFirstObjectByType<GridShape>(); // find grid once
         spriteRenderer = gameObject.GetComponent<SpriteRenderer>(); // find sprite renderer once
         nearbyCircles = Physics2D.OverlapCircleAll(transform.position, HealingRange).Select(collider => collider.GetComponent<Circle>()).ToArray(); // find nearby circles once
+        scaledHealing = nearbyCircles.Length * HealingPerSecond;
     }
 
     // Update is called once per frame
@@ -38,17 +40,22 @@ public class Circle : MonoBehaviour
     private void UpdateColor()
     {
         // grid and spriteRenderer set on start
-        spriteRenderer.color = grid.Colors[i, j] * Health / BaseHealth;
+        spriteRenderer.color = grid.Colors[i, j] * (Health / BaseHealth);
     }
 
     private void HealNearbyShapes()
     {
-        ReceiveHp(nearbyCircles.Length * HealingPerSecond * Time.deltaTime);
+        // instead heal itself by the amount of circles in range
+        ReceiveHp(scaledHealing * Time.deltaTime);
     }
 
     public void ReceiveHp(float hpReceived)
     {
         float newHealth = Health + hpReceived;
-        Health = Mathf.Clamp(newHealth, 0, BaseHealth);
+        if (newHealth < 0)
+            newHealth = 0;
+        else if (newHealth > BaseHealth)
+            newHealth = BaseHealth;
+        Health = newHealth;
     }
 }

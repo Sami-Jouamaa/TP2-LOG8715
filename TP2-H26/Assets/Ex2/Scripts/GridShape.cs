@@ -51,13 +51,14 @@ public class GridShape : MonoBehaviour
 
     private void UpdateColors()
     {
-        for (var j = 0; j < _height; j++)
+        for (var i = 0; i < _width; i++)
         {
-            for (var i = 0; i < _width; i++)
+            Color bottomColor = Colors[i,0];
+            for (var j = 0; j < _height - 1; j++)
             {
-                if (j >= _height - 1) continue;
-                (Colors[i, j], Colors[i, j + 1]) = (Colors[i, j + 1], Colors[i, j]);
+                Colors[i, j] = Colors[i, j + 1];
             }
+            Colors[i, _height - 1] = bottomColor;
         }
     }
 }
