@@ -36,15 +36,14 @@ public class Ex4Spawner : MonoBehaviour
     private void Awake()
     {
         Instance = this;
-    }
-
-    void Start()
-    {
         var size = (float) config.gridSize;
         var ratio = Camera.main!.aspect;
         _height = (int)Math.Round(Math.Sqrt(size / ratio));
         _width = (int)Math.Round(size / _height);
-        
+    }
+
+    void Start()
+    {
         PlantTransforms = new Transform[config.plantCount];
         PlantLifetimes = new Lifetime[config.plantCount];
         PlantVelocities = new Velocity[config.plantCount];
