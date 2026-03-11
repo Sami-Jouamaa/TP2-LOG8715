@@ -1,7 +1,18 @@
-﻿// using UnityEngine;
+﻿using UnityEngine;
 // using Unity.Burst;
 // using Unity.Collections;
 // using Unity.Jobs;
+
+public class ChangePredatorLifetime : MonoBehaviour
+{
+    void Update()
+    {
+        // intentionally empty
+    }
+}
+
+
+
 // // public class PredatorLifetimeManager : MonoBehaviour
 // // {
 // //     private NativeArray<Vector3> predatorPositions;

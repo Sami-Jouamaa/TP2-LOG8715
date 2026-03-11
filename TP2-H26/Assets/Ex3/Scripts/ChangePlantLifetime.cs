@@ -1,7 +1,17 @@
 ﻿// using Unity.Burst;
 // using Unity.Collections;
 // using Unity.Jobs;
-// using UnityEngine;
+using UnityEngine;
+
+
+public class ChangePlantLifetime : MonoBehaviour
+{
+    void Update()
+    {
+        // intentionally empty
+    }
+}
+
 
 // // public class PlantLifetimeManager : MonoBehaviour
 // // {

@@ -1,7 +1,16 @@
 ﻿// using Unity.Burst;
 // using Unity.Collections;
 // using Unity.Jobs;
-// using UnityEngine;
+using UnityEngine;
+
+public class ChangePreyLifetime : MonoBehaviour
+{
+    void Update()
+    {
+        // intentionally empty
+    }
+}
+
 
 // // public class PreyLifetimeManager : MonoBehaviour
 // // {

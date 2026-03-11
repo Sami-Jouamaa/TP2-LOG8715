@@ -18,6 +18,11 @@ public class LifetimeManager : MonoBehaviour
 
     void Start()
     {
+        if (Ex4Spawner.PlantTransforms == null)
+        {
+            Debug.LogError("Spawner not initialized yet.");
+            return;
+        }
         int plantCount = Ex4Spawner.PlantTransforms.Length;
         int preyCount = Ex4Spawner.PreyTransforms.Length;
         int predatorCount = Ex4Spawner.PredatorTransforms.Length;
@@ -37,6 +42,9 @@ public class LifetimeManager : MonoBehaviour
     void Update()
     {
         if (Ex4Spawner.Instance == null) return;
+        if (Ex4Spawner.PlantTransforms == null) return;
+        if (Ex4Spawner.PreyTransforms == null) return;
+        if (Ex4Spawner.PredatorTransforms == null) return;
 
         int plantCount = Ex4Spawner.PlantTransforms.Length;
         int preyCount = Ex4Spawner.PreyTransforms.Length;
