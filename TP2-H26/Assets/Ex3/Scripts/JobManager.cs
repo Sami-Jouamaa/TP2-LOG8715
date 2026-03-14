@@ -6,27 +6,135 @@ using UnityEngine;
 
 public class JobManager : MonoBehaviour
 {
-    NativeArray<Vector3> plantPositions;
-    NativeArray<Vector3> preyPositions;
-    NativeArray<Vector3> predatorPositions;
-    NativeArray<Vector3> preyVelocities;
-    NativeArray<Vector3> predatorVelocities;
+    private NativeArray<Vector3> plantPositions;
+    private NativeArray<Vector3> preyPositions;
+    private NativeArray<Vector3> predatorPositions;
 
-    NativeArray<float> plantFactors;
-    NativeArray<float> preyFactors;
-    NativeArray<float> predatorFactors;
+    private NativeArray<Vector3> preyVelocities;
+    private NativeArray<Vector3> predatorVelocities;
 
-    NativeArray<bool> preyReproduced;
-    NativeArray<bool> predatorReproduced;
+    private NativeArray<float> plantFactors;
+    private NativeArray<float> preyFactors;
+    private NativeArray<float> predatorFactors;
 
+    private NativeArray<bool> preyReproduced;
+    private NativeArray<bool> predatorReproduced;
 
-    void Start()
+    private NativeArray<bool> plantActive;
+    private NativeArray<bool> preyActive;
+    private NativeArray<bool> predatorActive;
+
+    private bool _initialized;
+
+    void Update()
     {
-        if (Ex4Spawner.PlantTransforms == null)
+        if (!_initialized)
         {
-            Debug.LogError("Spawner not initialized yet.");
-            return;
+            if (!TryInitialize())
+                return;
         }
+
+        int plantCount = Ex4Spawner.PlantTransforms.Length;
+        int preyCount = Ex4Spawner.PreyTransforms.Length;
+        int predatorCount = Ex4Spawner.PredatorTransforms.Length;
+
+        for (int i = 0; i < plantCount; i++)
+        {
+            plantPositions[i] = Ex4Spawner.PlantTransforms[i].position;
+            plantActive[i] = Ex4Spawner.PlantTransforms[i].gameObject.activeSelf;
+        }
+
+        for (int i = 0; i < preyCount; i++)
+        {
+            preyPositions[i] = Ex4Spawner.PreyTransforms[i].position;
+            preyVelocities[i] = Ex4Spawner.PreyVelocities[i].velocity;
+            preyActive[i] = Ex4Spawner.PreyTransforms[i].gameObject.activeSelf;
+        }
+
+        for (int i = 0; i < predatorCount; i++)
+        {
+            predatorPositions[i] = Ex4Spawner.PredatorTransforms[i].position;
+            predatorVelocities[i] = Ex4Spawner.PredatorVelocities[i].velocity;
+            predatorActive[i] = Ex4Spawner.PredatorTransforms[i].gameObject.activeSelf;
+        }
+
+        int maxCount = Mathf.Max(plantCount, preyCount, predatorCount);
+
+        var lifetimeJob = new LifetimeJob
+        {
+            plantPositions = plantPositions,
+            preyPositions = preyPositions,
+            predatorPositions = predatorPositions,
+
+            plantActive = plantActive,
+            preyActive = preyActive,
+            predatorActive = predatorActive,
+
+            plantFactors = plantFactors,
+            preyFactors = preyFactors,
+            predatorFactors = predatorFactors,
+
+            preyReproduced = preyReproduced,
+            predatorReproduced = predatorReproduced,
+
+            touchingDistance = Ex3Config.TouchingDistance
+        };
+
+        JobHandle lifetimeHandle = lifetimeJob.Schedule(maxCount, 32);
+        lifetimeHandle.Complete();
+
+        var moveJob = new MoveJob
+        {
+            plantPositions = plantPositions,
+            preyPositions = preyPositions,
+            predatorPositions = predatorPositions,
+
+            plantActive = plantActive,
+            preyActive = preyActive,
+            predatorActive = predatorActive,
+
+            preyVelocities = preyVelocities,
+            predatorVelocities = predatorVelocities,
+
+            preySpeed = Ex3Config.PreySpeed,
+            predatorSpeed = Ex3Config.PredatorSpeed
+        };
+
+        JobHandle moveHandle = moveJob.Schedule(maxCount, 32);
+        moveHandle.Complete();
+
+        for (int i = 0; i < plantCount; i++)
+        {
+            if (!plantActive[i]) continue;
+            Ex4Spawner.PlantLifetimes[i].decreasingFactor = plantFactors[i];
+        }
+
+        for (int i = 0; i < preyCount; i++)
+        {
+            if (!preyActive[i]) continue;
+
+            Ex4Spawner.PreyLifetimes[i].decreasingFactor = preyFactors[i];
+            Ex4Spawner.PreyLifetimes[i].reproduced = preyReproduced[i];
+            Ex4Spawner.PreyVelocities[i].velocity = preyVelocities[i];
+        }
+
+        for (int i = 0; i < predatorCount; i++)
+        {
+            if (!predatorActive[i]) continue;
+
+            Ex4Spawner.PredatorLifetimes[i].decreasingFactor = predatorFactors[i];
+            Ex4Spawner.PredatorLifetimes[i].reproduced = predatorReproduced[i];
+            Ex4Spawner.PredatorVelocities[i].velocity = predatorVelocities[i];
+        }
+    }
+
+    private bool TryInitialize()
+    {
+        if (Ex4Spawner.Instance == null) return false;
+        if (Ex4Spawner.PlantTransforms == null) return false;
+        if (Ex4Spawner.PreyTransforms == null) return false;
+        if (Ex4Spawner.PredatorTransforms == null) return false;
+
         int plantCount = Ex4Spawner.PlantTransforms.Length;
         int preyCount = Ex4Spawner.PreyTransforms.Length;
         int predatorCount = Ex4Spawner.PredatorTransforms.Length;
@@ -45,90 +153,12 @@ public class JobManager : MonoBehaviour
         preyReproduced = new NativeArray<bool>(preyCount, Allocator.Persistent);
         predatorReproduced = new NativeArray<bool>(predatorCount, Allocator.Persistent);
 
+        plantActive = new NativeArray<bool>(plantCount, Allocator.Persistent);
+        preyActive = new NativeArray<bool>(preyCount, Allocator.Persistent);
+        predatorActive = new NativeArray<bool>(predatorCount, Allocator.Persistent);
 
-    }
-
-    void Update()
-    {
-        if (Ex4Spawner.Instance == null) return;
-        if (Ex4Spawner.PlantTransforms == null) return;
-        if (Ex4Spawner.PreyTransforms == null) return;
-        if (Ex4Spawner.PredatorTransforms == null) return;
-
-        int plantCount = Ex4Spawner.PlantTransforms.Length;
-        int preyCount = Ex4Spawner.PreyTransforms.Length;
-        int predatorCount = Ex4Spawner.PredatorTransforms.Length;
-
-        for (int i = 0; i < plantCount; i++)
-            plantPositions[i] = Ex4Spawner.PlantTransforms[i].position;
-
-        for (int i = 0; i < preyCount; i++)
-            preyPositions[i] = Ex4Spawner.PreyTransforms[i].position;
-
-        for (int i = 0; i < predatorCount; i++)
-            predatorPositions[i] = Ex4Spawner.PredatorTransforms[i].position;
-        
-        for (int i = 0; i < preyCount; i++)
-            preyVelocities[i] = Ex4Spawner.PreyVelocities[i].velocity;
-
-        for (int i = 0; i < predatorCount; i++)
-            predatorVelocities[i] = Ex4Spawner.PredatorVelocities[i].velocity;
-
-        var lifetimeJob = new LifetimeJob
-        {
-            plantPositions = plantPositions,
-            preyPositions = preyPositions,
-            predatorPositions = predatorPositions,
-
-            plantFactors = plantFactors,
-            preyFactors = preyFactors,
-            predatorFactors = predatorFactors,
-
-            preyReproduced = preyReproduced,
-            predatorReproduced = predatorReproduced,
-
-            touchingDistance = Ex3Config.TouchingDistance
-        };
-
-        int maxCount = Mathf.Max(plantCount, preyCount, predatorCount);
-
-        JobHandle lifetimeHandle = lifetimeJob.Schedule(maxCount, 32);
-        lifetimeHandle.Complete();
-
-        var moveJob = new MoveJob
-        {
-            plantPositions = plantPositions,
-            preyPositions = preyPositions,
-            predatorPositions = predatorPositions,
-
-            preyVelocities = preyVelocities,
-            predatorVelocities = predatorVelocities,
-
-            preySpeed = Ex3Config.PreySpeed,
-            predatorSpeed = Ex3Config.PredatorSpeed
-        };
-
-        JobHandle moveHandle = moveJob.Schedule(maxCount, 32); 
-        moveHandle.Complete();
-
-        for (int i = 0; i < plantCount; i++)
-            Ex4Spawner.PlantLifetimes[i].decreasingFactor = plantFactors[i];
-
-        for (int i = 0; i < preyCount; i++)
-        {
-            Ex4Spawner.PreyLifetimes[i].decreasingFactor = preyFactors[i];
-            Ex4Spawner.PreyLifetimes[i].reproduced = preyReproduced[i];
-
-            Ex4Spawner.PreyVelocities[i].velocity = preyVelocities[i];
-        }
-
-        for (int i = 0; i < predatorCount; i++)
-        {
-            Ex4Spawner.PredatorLifetimes[i].decreasingFactor = predatorFactors[i];
-            Ex4Spawner.PredatorLifetimes[i].reproduced = predatorReproduced[i];
-
-            Ex4Spawner.PredatorVelocities[i].velocity = predatorVelocities[i];
-        }
+        _initialized = true;
+        return true;
     }
 
     void OnDestroy()
@@ -146,6 +176,10 @@ public class JobManager : MonoBehaviour
 
         if (preyReproduced.IsCreated) preyReproduced.Dispose();
         if (predatorReproduced.IsCreated) predatorReproduced.Dispose();
+
+        if (plantActive.IsCreated) plantActive.Dispose();
+        if (preyActive.IsCreated) preyActive.Dispose();
+        if (predatorActive.IsCreated) predatorActive.Dispose();
     }
 }
 
@@ -155,6 +189,10 @@ public struct LifetimeJob : IJobParallelFor
     [ReadOnly] public NativeArray<Vector3> plantPositions;
     [ReadOnly] public NativeArray<Vector3> preyPositions;
     [ReadOnly] public NativeArray<Vector3> predatorPositions;
+
+    [ReadOnly] public NativeArray<bool> plantActive;
+    [ReadOnly] public NativeArray<bool> preyActive;
+    [ReadOnly] public NativeArray<bool> predatorActive;
 
     public NativeArray<float> plantFactors;
     public NativeArray<float> preyFactors;
@@ -167,102 +205,136 @@ public struct LifetimeJob : IJobParallelFor
 
     public void Execute(int index)
     {
-        float dist;
-
         if (index < plantPositions.Length)
         {
-            float factor = 1f;
-            Vector3 plant = plantPositions[index];
-
-            for (int i = 0; i < preyPositions.Length; i++)
+            if (!plantActive[index])
             {
-                dist = Vector3.Distance(preyPositions[i], plant);
-                if (dist < touchingDistance)
-                {
-                    factor *= 2f;
-                    break;
-                }
+                plantFactors[index] = 1f;
             }
+            else
+            {
+                float factor = 1f;
+                Vector3 plant = plantPositions[index];
 
-            plantFactors[index] = factor;
+                for (int i = 0; i < preyPositions.Length; i++)
+                {
+                    if (!preyActive[i]) continue;
+
+                    if (Vector3.Distance(preyPositions[i], plant) < touchingDistance)
+                    {
+                        factor *= 2f;
+                        break;
+                    }
+                }
+
+                plantFactors[index] = factor;
+            }
         }
 
         if (index < preyPositions.Length)
         {
-            float factor = 1f;
-            bool reproduced = false;
-            Vector3 prey = preyPositions[index];
-
-            for (int i = 0; i < plantPositions.Length; i++)
+            if (!preyActive[index])
             {
-                if (Vector3.Distance(plantPositions[i], prey) < touchingDistance)
-                {
-                    factor /= 2f;
-                    break;
-                }
+                preyFactors[index] = 1f;
+                preyReproduced[index] = false;
             }
-
-            for (int i = 0; i < predatorPositions.Length; i++)
+            else
             {
-                if (Vector3.Distance(predatorPositions[i], prey) < touchingDistance)
+                float factor = 1f;
+                bool reproduced = false;
+                Vector3 prey = preyPositions[index];
+
+                for (int i = 0; i < plantPositions.Length; i++)
                 {
-                    factor *= 2f;
-                    break;
+                    if (!plantActive[i]) continue;
+
+                    if (Vector3.Distance(plantPositions[i], prey) < touchingDistance)
+                    {
+                        factor /= 2f;
+                        break;
+                    }
                 }
-            }
 
-            for (int i = 0; i < preyPositions.Length; i++)
-            {
-                if (i == index) continue;
-
-                if (Vector3.Distance(preyPositions[i], prey) < touchingDistance)
+                for (int i = 0; i < predatorPositions.Length; i++)
                 {
-                    reproduced = true;
-                    break;
-                }
-            }
+                    if (!predatorActive[i]) continue;
 
-            preyFactors[index] = factor;
-            preyReproduced[index] = reproduced;
+                    if (Vector3.Distance(predatorPositions[i], prey) < touchingDistance)
+                    {
+                        factor *= 2f;
+                        break;
+                    }
+                }
+
+                for (int i = 0; i < preyPositions.Length; i++)
+                {
+                    if (i == index) continue;
+                    if (!preyActive[i]) continue;
+
+                    if (Vector3.Distance(preyPositions[i], prey) < touchingDistance)
+                    {
+                        reproduced = true;
+                        break;
+                    }
+                }
+
+                preyFactors[index] = factor;
+                preyReproduced[index] = reproduced;
+            }
         }
 
         if (index < predatorPositions.Length)
         {
-            float factor = 1f;
-            bool reproduced = false;
-            Vector3 predator = predatorPositions[index];
-
-            for (int i = 0; i < predatorPositions.Length; i++)
+            if (!predatorActive[index])
             {
-                if (i == index) continue;
-
-                if (Vector3.Distance(predatorPositions[i], predator) < touchingDistance)
-                {
-                    reproduced = true;
-                    break;
-                }
+                predatorFactors[index] = 1f;
+                predatorReproduced[index] = false;
             }
-
-            for (int i = 0; i < preyPositions.Length; i++)
+            else
             {
-                if (Vector3.Distance(preyPositions[i], predator) < touchingDistance)
-                {
-                    factor /= 2f;
-                }
-            }
+                float factor = 1f;
+                bool reproduced = false;
+                Vector3 predator = predatorPositions[index];
 
-            predatorFactors[index] = factor;
-            predatorReproduced[index] = reproduced;
+                for (int i = 0; i < predatorPositions.Length; i++)
+                {
+                    if (i == index) continue;
+                    if (!predatorActive[i]) continue;
+
+                    if (Vector3.Distance(predatorPositions[i], predator) < touchingDistance)
+                    {
+                        reproduced = true;
+                        break;
+                    }
+                }
+
+                for (int i = 0; i < preyPositions.Length; i++)
+                {
+                    if (!preyActive[i]) continue;
+
+                    if (Vector3.Distance(preyPositions[i], predator) < touchingDistance)
+                    {
+                        factor /= 2f;
+                    }
+                }
+
+                predatorFactors[index] = factor;
+                predatorReproduced[index] = reproduced;
+            }
         }
     }
 }
 
 [BurstCompile]
-struct MoveJob : IJobParallelFor
+public struct MoveJob : IJobParallelFor
 {
+    [ReadOnly] public NativeArray<Vector3> plantPositions;
     [ReadOnly] public NativeArray<Vector3> preyPositions;
     [ReadOnly] public NativeArray<Vector3> predatorPositions;
-    [ReadOnly] public NativeArray<Vector3> plantPositions;
+
+    [ReadOnly] public NativeArray<bool> plantActive;
+    [ReadOnly] public NativeArray<bool> preyActive;
+    [ReadOnly] public NativeArray<bool> predatorActive;
 
     public NativeArray<Vector3> preyVelocities;
     public NativeArray<Vector3> predatorVelocities;
@@ -272,38 +344,58 @@ struct MoveJob : IJobParallelFor
 
     public void Execute(int index)
     {
-        // Move prey toward closest plant
         if (index < preyPositions.Length)
         {
-            float minDist = float.MaxValue;
-            Vector3 closestPlant = preyPositions[index];
-            for (int i = 0; i < plantPositions.Length; i++)
+            if (!preyActive[index])
             {
-                float d = math.distance(preyPositions[index], plantPositions[i]);
-                if (d < minDist)
-                {
-                    minDist = d;
-                    closestPlant = plantPositions[i];
-                }
+                preyVelocities[index] = Vector3.zero;
             }
-            preyVelocities[index] = (closestPlant - preyPositions[index]) * preySpeed;
+            else
+            {
+                float minDist = float.MaxValue;
+                Vector3 closestPlant = preyPositions[index];
+
+                for (int i = 0; i < plantPositions.Length; i++)
+                {
+                    if (!plantActive[i]) continue;
+
+                    float d = math.distance(preyPositions[index], plantPositions[i]);
+                    if (d < minDist)
+                    {
+                        minDist = d;
+                        closestPlant = plantPositions[i];
+                    }
+                }
+
+                preyVelocities[index] = (closestPlant - preyPositions[index]) * preySpeed;
+            }
         }
 
-        // Move predator toward closest prey
         if (index < predatorPositions.Length)
         {
-            float minDist = float.MaxValue;
-            Vector3 closestPrey = predatorPositions[index];
-            for (int i = 0; i < preyPositions.Length; i++)
+            if (!predatorActive[index])
             {
-                float d = math.distance(predatorPositions[index], preyPositions[i]);
-                if (d < minDist)
-                {
-                    minDist = d;
-                    closestPrey = preyPositions[i];
-                }
+                predatorVelocities[index] = Vector3.zero;
             }
-            predatorVelocities[index] = (closestPrey - predatorPositions[index]) * predatorSpeed;
+            else
+            {
+                float minDist = float.MaxValue;
+                Vector3 closestPrey = predatorPositions[index];
+
+                for (int i = 0; i < preyPositions.Length; i++)
+                {
+                    if (!preyActive[i]) continue;
+
+                    float d = math.distance(predatorPositions[index], preyPositions[i]);
+                    if (d < minDist)
+                    {
+                        minDist = d;
+                        closestPrey = preyPositions[i];
+                    }
+                }
+
+                predatorVelocities[index] = (closestPrey - predatorPositions[index]) * predatorSpeed;
+            }
         }
     }
 }
