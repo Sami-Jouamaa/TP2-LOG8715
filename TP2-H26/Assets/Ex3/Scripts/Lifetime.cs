@@ -2,6 +2,7 @@ using UnityEngine;
 
 public class Lifetime : MonoBehaviour
 {
+    // in initial setup for entities
     private const float StartingLifetimeLowerBound = 5;
     private const float StartingLifetimeUpperBound = 15;
     
