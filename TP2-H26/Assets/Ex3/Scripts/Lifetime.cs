@@ -18,7 +18,12 @@ public class Lifetime : MonoBehaviour
         return _lifetime / _startingLifetime;
     }
 
-    void Start()
+    private void Awake()
+    {
+        ResetLifetime();
+    }
+
+    private void OnEnable()
     {
         ResetLifetime();
     }
@@ -29,20 +34,23 @@ public class Lifetime : MonoBehaviour
         decreasingFactor = 1f;
         _startingLifetime = Random.Range(StartingLifetimeLowerBound, StartingLifetimeUpperBound);
         _lifetime = _startingLifetime;
-        gameObject.SetActive(true);
     }
 
-    void Update()
+    public bool Tick(float deltaTime)
     {
-        _lifetime -= Time.deltaTime * decreasingFactor;
+        _lifetime -= deltaTime * decreasingFactor;
+        return _lifetime <= 0f;
+    }
 
-        if (_lifetime > 0f)
-            return;
-
+    public void ResolveEndOfLife(Transform cachedTransform)
+    {
         if (reproduced || alwaysReproduce)
         {
             ResetLifetime();
-            Ex4Spawner.Instance.Respawn(transform);
+            if (Ex4Spawner.Instance != null)
+            {
+                Ex4Spawner.Instance.Respawn(cachedTransform);
+            }
         }
         else
         {

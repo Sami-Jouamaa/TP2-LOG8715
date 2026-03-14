@@ -30,32 +30,27 @@ public class Ex4Spawner : MonoBehaviour
     {
         var halfWidth = _width / 2;
         var halfHeight = _height / 2;
-        t.position = new Vector3(
-            Random.Range(-halfWidth, halfWidth),
-            Random.Range(-halfHeight, halfHeight),
-            0f
-        );
+        t.position = new Vector3Int(Random.Range(-halfWidth, halfWidth), Random.Range(-halfHeight, halfHeight));
+        t.gameObject.SetActive(true);
     }
 
     private void Awake()
     {
         Instance = this;
-
         var size = (float)config.gridSize;
-        var ratio = Camera.main.aspect;
+        var ratio = Camera.main != null ? Camera.main.aspect : 1f;
         _height = (int)Math.Round(Math.Sqrt(size / ratio));
         _width = (int)Math.Round(size / _height);
     }
 
-    void Start()
+    private void Start()
     {
         PlantTransforms = new Transform[config.plantCount];
         PlantLifetimes = new Lifetime[config.plantCount];
         PlantVelocities = new Velocity[config.plantCount];
-
-        for (int i = 0; i < config.plantCount; i++)
+        for (var i = 0; i < config.plantCount; i++)
         {
-            GameObject go = Create(plantPrefab);
+            var go = Create(plantPrefab);
             PlantTransforms[i] = go.transform;
             PlantLifetimes[i] = go.GetComponent<Lifetime>();
             PlantVelocities[i] = go.GetComponent<Velocity>();
@@ -64,10 +59,9 @@ public class Ex4Spawner : MonoBehaviour
         PreyTransforms = new Transform[config.preyCount];
         PreyLifetimes = new Lifetime[config.preyCount];
         PreyVelocities = new Velocity[config.preyCount];
-
-        for (int i = 0; i < config.preyCount; i++)
+        for (var i = 0; i < config.preyCount; i++)
         {
-            GameObject go = Create(preyPrefab);
+            var go = Create(preyPrefab);
             PreyTransforms[i] = go.transform;
             PreyLifetimes[i] = go.GetComponent<Lifetime>();
             PreyVelocities[i] = go.GetComponent<Velocity>();
@@ -76,10 +70,9 @@ public class Ex4Spawner : MonoBehaviour
         PredatorTransforms = new Transform[config.predatorCount];
         PredatorLifetimes = new Lifetime[config.predatorCount];
         PredatorVelocities = new Velocity[config.predatorCount];
-
-        for (int i = 0; i < config.predatorCount; i++)
+        for (var i = 0; i < config.predatorCount; i++)
         {
-            GameObject go = Create(predatorPrefab);
+            var go = Create(predatorPrefab);
             PredatorTransforms[i] = go.transform;
             PredatorLifetimes[i] = go.GetComponent<Lifetime>();
             PredatorVelocities[i] = go.GetComponent<Velocity>();
@@ -88,7 +81,7 @@ public class Ex4Spawner : MonoBehaviour
 
     private GameObject Create(GameObject prefab)
     {
-        GameObject go = Instantiate(prefab);
+        var go = Instantiate(prefab);
         Respawn(go.transform);
         return go;
     }

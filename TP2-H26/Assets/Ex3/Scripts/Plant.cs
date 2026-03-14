@@ -5,13 +5,13 @@ public class Plant : MonoBehaviour
 {
     private Lifetime _lifetime;
 
-    void Awake()
+    private void Awake()
     {
         _lifetime = GetComponent<Lifetime>();
     }
 
-    void Update()
+    private void Update()
     {
-        transform.localScale = Vector3.one * _lifetime.GetProgression();
+        transform.localScale = Vector3.one * Mathf.Max(0f, _lifetime.GetProgression());
     }
 }
