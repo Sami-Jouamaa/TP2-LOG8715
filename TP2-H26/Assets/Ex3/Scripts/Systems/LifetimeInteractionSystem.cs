@@ -4,132 +4,99 @@ using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
 
+[BurstCompile]
 [UpdateInGroup(typeof(SimulationSystemGroup))]
 [UpdateBefore(typeof(LifetimeSystem))]
 [UpdateBefore(typeof(MoveSystem))]
 public partial struct LifetimeInteractionSystem : ISystem
 {
+    private EntityQuery allQuery;
+
     public void OnCreate(ref SystemState state)
     {
         state.RequireForUpdate<GridConfigSingleton>();
+        allQuery = SystemAPI.QueryBuilder().WithAll<LocalTransform>().Build();
     }
 
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        // Gather positions into NativeArrays
-        var plantQuery = SystemAPI.QueryBuilder().WithAll<PlantTag, LocalTransform>().Build();
-        var preyQuery = SystemAPI.QueryBuilder().WithAll<PreyTag, LocalTransform>().Build();
-        var predatorQuery = SystemAPI.QueryBuilder().WithAll<PredatorTag, LocalTransform>().Build();
+        var gridConfig = SystemAPI.GetSingleton<GridConfigSingleton>();
+        int width = gridConfig.HalfWidth * 2;
+        int height = gridConfig.HalfHeight * 2;
+        float cellSize = Ex3Config.TouchingDistance;
 
-        var plantPositions = new NativeArray<float3>(plantQuery.CalculateEntityCount(), Allocator.TempJob);
-        var preyPositions = new NativeArray<float3>(preyQuery.CalculateEntityCount(), Allocator.TempJob);
-        var predatorPositions = new NativeArray<float3>(predatorQuery.CalculateEntityCount(), Allocator.TempJob);
+        float touchDistSq = Ex3Config.TouchingDistance * Ex3Config.TouchingDistance;
 
-        int idx = 0;
-        foreach (var lt in SystemAPI.Query<RefRO<LocalTransform>>().WithAll<PlantTag>())
-            plantPositions[idx++] = lt.ValueRO.Position;
+        var grid = new NativeHashMap<int, NativeList<Entity>>(allQuery.CalculateEntityCount(), Allocator.Temp);
 
-        idx = 0;
-        foreach (var lt in SystemAPI.Query<RefRO<LocalTransform>>().WithAll<PreyTag>())
-            preyPositions[idx++] = lt.ValueRO.Position;
+        var transforms = SystemAPI.GetComponentLookup<LocalTransform>(true);
 
-        idx = 0;
-        foreach (var lt in SystemAPI.Query<RefRO<LocalTransform>>().WithAll<PredatorTag>())
-            predatorPositions[idx++] = lt.ValueRO.Position;
-
-        float touchDist = Ex3Config.TouchingDistance;
-
-        // Update plant lifetimes
-        foreach (var (lifetime, lt) in SystemAPI.Query<RefRW<LifetimeData>, RefRO<LocalTransform>>().WithAll<PlantTag>())
+        foreach (var (lt, entity) in SystemAPI.Query<RefRO<LocalTransform>>().WithEntityAccess())
         {
-            float factor = 1f;
-            float3 pos = lt.ValueRO.Position;
-            for (int i = 0; i < preyPositions.Length; i++)
-            {
-                if (math.distance(preyPositions[i], pos) < touchDist)
-                {
-                    factor *= 2f;
-                    break;
-                }
-            }
-            lifetime.ValueRW.DecreasingFactor = factor;
+            int2 cell = (int2)math.floor(lt.ValueRO.Position.xy / cellSize);
+            if (cell.x < 0 || cell.x >= width || cell.y < 0 || cell.y >= height) continue;
+
+            int flatIndex = cell.x + cell.y * width;
+
+            if (!grid.ContainsKey(flatIndex))
+                grid[flatIndex] = new NativeList<Entity>(Allocator.Temp);
+
+            grid[flatIndex].Add(entity);
         }
-
-        // Update prey lifetimes
-        int preyIdx = 0;
-        foreach (var (lifetime, lt) in SystemAPI.Query<RefRW<LifetimeData>, RefRO<LocalTransform>>().WithAll<PreyTag>())
+        foreach (var (lt, lifetime, entity) in SystemAPI.Query<RefRO<LocalTransform>, RefRW<LifetimeData>>().WithEntityAccess())
         {
+            float3 pos = lt.ValueRO.Position;
             float factor = 1f;
             bool reproduced = false;
-            float3 pos = lt.ValueRO.Position;
 
-            for (int i = 0; i < plantPositions.Length; i++)
-            {
-                if (math.distance(plantPositions[i], pos) < touchDist)
-                {
-                    factor /= 2f;
-                    break;
-                }
-            }
+            int2 cell = (int2)math.floor(pos.xy / cellSize);
 
-            for (int i = 0; i < predatorPositions.Length; i++)
+            for (int x = -1; x <= 1; x++)
+            for (int y = -1; y <= 1; y++)
             {
-                if (math.distance(predatorPositions[i], pos) < touchDist)
-                {
-                    factor *= 2f;
-                    break;
-                }
-            }
+                int2 neighbor = cell + new int2(x, y);
+                if (neighbor.x < 0 || neighbor.x >= width || neighbor.y < 0 || neighbor.y >= height) continue;
 
-            for (int i = 0; i < preyPositions.Length; i++)
-            {
-                if (i == preyIdx) { preyIdx++; continue; }
-                if (math.distance(preyPositions[i], pos) < touchDist)
+                int flatIndex = neighbor.x + neighbor.y * width;
+
+                if (grid.TryGetValue(flatIndex, out var list))
                 {
-                    reproduced = true;
-                    break;
+                    for (int i = 0; i < list.Length; i++)
+                    {
+                        var other = list[i];
+                        if (other == entity) continue;
+
+                        float3 otherPos = transforms[other].Position;
+                        if (math.distancesq(pos, otherPos) < touchDistSq)
+                        {
+                            bool isPlant = SystemAPI.HasComponent<PlantTag>(other);
+                            bool isPrey = SystemAPI.HasComponent<PreyTag>(other);
+                            bool isPredator = SystemAPI.HasComponent<PredatorTag>(other);
+
+                            if (SystemAPI.HasComponent<PlantTag>(entity) && isPrey) factor *= 2f;
+                            if (SystemAPI.HasComponent<PreyTag>(entity))
+                            {
+                                if (isPlant) factor /= 2f;
+                                if (isPredator) factor *= 2f;
+                                if (isPrey) reproduced = true;
+                            }
+                            if (SystemAPI.HasComponent<PredatorTag>(entity))
+                            {
+                                if (isPrey) factor /= 2f;
+                                if (isPredator) reproduced = true;
+                            }
+                        }
+                    }
                 }
             }
 
             lifetime.ValueRW.DecreasingFactor = factor;
             lifetime.ValueRW.Reproduced = reproduced;
-            preyIdx++;
         }
+        foreach (var kvp in grid)
+            kvp.Value.Dispose();
 
-        // Update predator lifetimes
-        int predIdx = 0;
-        foreach (var (lifetime, lt) in SystemAPI.Query<RefRW<LifetimeData>, RefRO<LocalTransform>>().WithAll<PredatorTag>())
-        {
-            float factor = 1f;
-            bool reproduced = false;
-            float3 pos = lt.ValueRO.Position;
-
-            for (int i = 0; i < predatorPositions.Length; i++)
-            {
-                if (i == predIdx) continue;
-                if (math.distance(predatorPositions[i], pos) < touchDist)
-                {
-                    reproduced = true;
-                    break;
-                }
-            }
-
-            for (int i = 0; i < preyPositions.Length; i++)
-            {
-                if (math.distance(preyPositions[i], pos) < touchDist)
-                {
-                    factor /= 2f;
-                }
-            }
-
-            lifetime.ValueRW.DecreasingFactor = factor;
-            lifetime.ValueRW.Reproduced = reproduced;
-            predIdx++;
-        }
-
-        plantPositions.Dispose();
-        preyPositions.Dispose();
-        predatorPositions.Dispose();
+        grid.Dispose();
     }
 }
