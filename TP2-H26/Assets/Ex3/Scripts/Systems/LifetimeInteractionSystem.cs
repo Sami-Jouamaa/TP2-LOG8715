@@ -1,6 +1,7 @@
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
 
@@ -10,93 +11,187 @@ using Unity.Transforms;
 [UpdateBefore(typeof(MoveSystem))]
 public partial struct LifetimeInteractionSystem : ISystem
 {
-    private EntityQuery allQuery;
+    private EntityQuery _plantQuery;
+    private EntityQuery _preyQuery;
+    private EntityQuery _predatorQuery;
 
+    [BurstCompile]
     public void OnCreate(ref SystemState state)
     {
         state.RequireForUpdate<GridConfigSingleton>();
-        allQuery = SystemAPI.QueryBuilder().WithAll<LocalTransform>().Build();
+
+        _plantQuery = SystemAPI.QueryBuilder().WithAll<PlantTag, LocalTransform, LifetimeData>().Build();
+        _preyQuery = SystemAPI.QueryBuilder().WithAll<PreyTag, LocalTransform, LifetimeData>().Build();
+        _predatorQuery = SystemAPI.QueryBuilder().WithAll<PredatorTag, LocalTransform, LifetimeData>().Build();
     }
 
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        var gridConfig = SystemAPI.GetSingleton<GridConfigSingleton>();
-        int width = gridConfig.HalfWidth * 2;
-        int height = gridConfig.HalfHeight * 2;
-        float cellSize = Ex3Config.TouchingDistance;
+        var plantTransforms = _plantQuery.ToComponentDataArray<LocalTransform>(Allocator.TempJob);
+        var preyTransforms = _preyQuery.ToComponentDataArray<LocalTransform>(Allocator.TempJob);
+        var predatorTransforms = _predatorQuery.ToComponentDataArray<LocalTransform>(Allocator.TempJob);
+
+        var plantPositions = new NativeArray<float3>(plantTransforms.Length, Allocator.TempJob);
+        var preyPositions = new NativeArray<float3>(preyTransforms.Length, Allocator.TempJob);
+        var predatorPositions = new NativeArray<float3>(predatorTransforms.Length, Allocator.TempJob);
+
+        for (int i = 0; i < plantTransforms.Length; i++)
+            plantPositions[i] = plantTransforms[i].Position;
+
+        for (int i = 0; i < preyTransforms.Length; i++)
+            preyPositions[i] = preyTransforms[i].Position;
+
+        for (int i = 0; i < predatorTransforms.Length; i++)
+            predatorPositions[i] = predatorTransforms[i].Position;
 
         float touchDistSq = Ex3Config.TouchingDistance * Ex3Config.TouchingDistance;
 
-        var grid = new NativeHashMap<int, NativeList<Entity>>(allQuery.CalculateEntityCount(), Allocator.Temp);
-
-        var transforms = SystemAPI.GetComponentLookup<LocalTransform>(true);
-
-        foreach (var (lt, entity) in SystemAPI.Query<RefRO<LocalTransform>>().WithEntityAccess())
+        var plantJob = new PlantLifetimeJob
         {
-            int2 cell = (int2)math.floor(lt.ValueRO.Position.xy / cellSize);
-            if (cell.x < 0 || cell.x >= width || cell.y < 0 || cell.y >= height) continue;
+            PreyPositions = preyPositions,
+            TouchDistSq = touchDistSq
+        };
 
-            int flatIndex = cell.x + cell.y * width;
-
-            if (!grid.ContainsKey(flatIndex))
-                grid[flatIndex] = new NativeList<Entity>(Allocator.Temp);
-
-            grid[flatIndex].Add(entity);
-        }
-        foreach (var (lt, lifetime, entity) in SystemAPI.Query<RefRO<LocalTransform>, RefRW<LifetimeData>>().WithEntityAccess())
+        var preyJob = new PreyLifetimeJob
         {
-            float3 pos = lt.ValueRO.Position;
+            PlantPositions = plantPositions,
+            PreyPositions = preyPositions,
+            PredatorPositions = predatorPositions,
+            TouchDistSq = touchDistSq
+        };
+
+        var predatorJob = new PredatorLifetimeJob
+        {
+            PreyPositions = preyPositions,
+            PredatorPositions = predatorPositions,
+            TouchDistSq = touchDistSq
+        };
+
+        JobHandle plantHandle = plantJob.ScheduleParallel(state.Dependency);
+        JobHandle preyHandle = preyJob.ScheduleParallel(plantHandle);
+        JobHandle predatorHandle = predatorJob.ScheduleParallel(preyHandle);
+
+        predatorHandle.Complete();
+
+        plantTransforms.Dispose();
+        preyTransforms.Dispose();
+        predatorTransforms.Dispose();
+
+        plantPositions.Dispose();
+        preyPositions.Dispose();
+        predatorPositions.Dispose();
+    }
+
+    [BurstCompile]
+    [WithAll(typeof(PlantTag))]
+    public partial struct PlantLifetimeJob : IJobEntity
+    {
+        [ReadOnly] public NativeArray<float3> PreyPositions;
+        public float TouchDistSq;
+
+        public void Execute(ref LifetimeData lifetime, in LocalTransform transform)
+        {
             float factor = 1f;
-            bool reproduced = false;
+            float3 pos = transform.Position;
 
-            int2 cell = (int2)math.floor(pos.xy / cellSize);
-
-            for (int x = -1; x <= 1; x++)
-            for (int y = -1; y <= 1; y++)
+            for (int i = 0; i < PreyPositions.Length; i++)
             {
-                int2 neighbor = cell + new int2(x, y);
-                if (neighbor.x < 0 || neighbor.x >= width || neighbor.y < 0 || neighbor.y >= height) continue;
-
-                int flatIndex = neighbor.x + neighbor.y * width;
-
-                if (grid.TryGetValue(flatIndex, out var list))
+                if (math.distancesq(pos, PreyPositions[i]) < TouchDistSq)
                 {
-                    for (int i = 0; i < list.Length; i++)
-                    {
-                        var other = list[i];
-                        if (other == entity) continue;
-
-                        float3 otherPos = transforms[other].Position;
-                        if (math.distancesq(pos, otherPos) < touchDistSq)
-                        {
-                            bool isPlant = SystemAPI.HasComponent<PlantTag>(other);
-                            bool isPrey = SystemAPI.HasComponent<PreyTag>(other);
-                            bool isPredator = SystemAPI.HasComponent<PredatorTag>(other);
-
-                            if (SystemAPI.HasComponent<PlantTag>(entity) && isPrey) factor *= 2f;
-                            if (SystemAPI.HasComponent<PreyTag>(entity))
-                            {
-                                if (isPlant) factor /= 2f;
-                                if (isPredator) factor *= 2f;
-                                if (isPrey) reproduced = true;
-                            }
-                            if (SystemAPI.HasComponent<PredatorTag>(entity))
-                            {
-                                if (isPrey) factor /= 2f;
-                                if (isPredator) reproduced = true;
-                            }
-                        }
-                    }
+                    factor *= 2f;
+                    break;
                 }
             }
 
-            lifetime.ValueRW.DecreasingFactor = factor;
-            lifetime.ValueRW.Reproduced = reproduced;
+            lifetime.DecreasingFactor = factor;
         }
-        foreach (var kvp in grid)
-            kvp.Value.Dispose();
+    }
 
-        grid.Dispose();
+    [BurstCompile]
+    [WithAll(typeof(PreyTag))]
+    public partial struct PreyLifetimeJob : IJobEntity
+    {
+        [ReadOnly] public NativeArray<float3> PlantPositions;
+        [ReadOnly] public NativeArray<float3> PreyPositions;
+        [ReadOnly] public NativeArray<float3> PredatorPositions;
+        public float TouchDistSq;
+
+        public void Execute(ref LifetimeData lifetime, in LocalTransform transform, [EntityIndexInQuery] int entityIndex)
+        {
+            float factor = 1f;
+            bool reproduced = false;
+            float3 pos = transform.Position;
+
+            for (int i = 0; i < PlantPositions.Length; i++)
+            {
+                if (math.distancesq(pos, PlantPositions[i]) < TouchDistSq)
+                {
+                    factor /= 2f;
+                    break;
+                }
+            }
+
+            for (int i = 0; i < PredatorPositions.Length; i++)
+            {
+                if (math.distancesq(pos, PredatorPositions[i]) < TouchDistSq)
+                {
+                    factor *= 2f;
+                    break;
+                }
+            }
+
+            for (int i = 0; i < PreyPositions.Length; i++)
+            {
+                if (i == entityIndex) continue;
+
+                if (math.distancesq(pos, PreyPositions[i]) < TouchDistSq)
+                {
+                    reproduced = true;
+                    break;
+                }
+            }
+
+            lifetime.DecreasingFactor = factor;
+            lifetime.Reproduced = reproduced;
+        }
+    }
+
+    [BurstCompile]
+    [WithAll(typeof(PredatorTag))]
+    public partial struct PredatorLifetimeJob : IJobEntity
+    {
+        [ReadOnly] public NativeArray<float3> PreyPositions;
+        [ReadOnly] public NativeArray<float3> PredatorPositions;
+        public float TouchDistSq;
+
+        public void Execute(ref LifetimeData lifetime, in LocalTransform transform, [EntityIndexInQuery] int entityIndex)
+        {
+            float factor = 1f;
+            bool reproduced = false;
+            float3 pos = transform.Position;
+
+            for (int i = 0; i < PredatorPositions.Length; i++)
+            {
+                if (i == entityIndex) continue;
+
+                if (math.distancesq(pos, PredatorPositions[i]) < TouchDistSq)
+                {
+                    reproduced = true;
+                    break;
+                }
+            }
+
+            for (int i = 0; i < PreyPositions.Length; i++)
+            {
+                if (math.distancesq(pos, PreyPositions[i]) < TouchDistSq)
+                {
+                    factor /= 2f;
+                }
+            }
+
+            lifetime.DecreasingFactor = factor;
+            lifetime.Reproduced = reproduced;
+        }
     }
 }

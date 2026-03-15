@@ -1,6 +1,7 @@
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
 
@@ -9,120 +10,106 @@ using Unity.Transforms;
 [UpdateBefore(typeof(VelocitySystem))]
 public partial struct MoveSystem : ISystem
 {
+    private EntityQuery _plantQuery;
+    private EntityQuery _preyQuery;
+
+    [BurstCompile]
     public void OnCreate(ref SystemState state)
     {
         state.RequireForUpdate<GridConfigSingleton>();
+
+        _plantQuery = SystemAPI.QueryBuilder().WithAll<PlantTag, LocalTransform>().Build();
+        _preyQuery = SystemAPI.QueryBuilder().WithAll<PreyTag, LocalTransform>().Build();
     }
 
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        var gridConfig = SystemAPI.GetSingleton<GridConfigSingleton>();
-        int width = gridConfig.HalfWidth * 2;
-        int height = gridConfig.HalfHeight * 2;
-        float cellSize = Ex3Config.TouchingDistance;
+        var plantTransforms = _plantQuery.ToComponentDataArray<LocalTransform>(Allocator.TempJob);
+        var preyTransforms = _preyQuery.ToComponentDataArray<LocalTransform>(Allocator.TempJob);
 
-        var plantGrid = new NativeHashMap<int, NativeList<Entity>>(1000, Allocator.Temp);
-        var preyGrid = new NativeHashMap<int, NativeList<Entity>>(1000, Allocator.Temp);
+        var plantPositions = new NativeArray<float3>(plantTransforms.Length, Allocator.TempJob);
+        var preyPositions = new NativeArray<float3>(preyTransforms.Length, Allocator.TempJob);
 
-        var transforms = SystemAPI.GetComponentLookup<LocalTransform>(true);
+        for (int i = 0; i < plantTransforms.Length; i++)
+            plantPositions[i] = plantTransforms[i].Position;
 
-        foreach (var (lt, entity) in SystemAPI.Query<RefRO<LocalTransform>>().WithAll<PlantTag>().WithEntityAccess())
+        for (int i = 0; i < preyTransforms.Length; i++)
+            preyPositions[i] = preyTransforms[i].Position;
+
+        var preyJob = new MovePreyJob
         {
-            int2 cell = (int2)math.floor(lt.ValueRO.Position.xy / cellSize);
-            if (cell.x < 0 || cell.x >= width || cell.y < 0 || cell.y >= height) continue;
-            int flatIndex = cell.x + cell.y * width;
+            PlantPositions = plantPositions,
+            Speed = Ex3Config.PreySpeed
+        };
 
-            if (!plantGrid.ContainsKey(flatIndex))
-                plantGrid[flatIndex] = new NativeList<Entity>(Allocator.Temp);
-            plantGrid[flatIndex].Add(entity);
-        }
-
-        foreach (var (lt, entity) in SystemAPI.Query<RefRO<LocalTransform>>().WithAll<PreyTag>().WithEntityAccess())
+        var predatorJob = new MovePredatorJob
         {
-            int2 cell = (int2)math.floor(lt.ValueRO.Position.xy / cellSize);
-            if (cell.x < 0 || cell.x >= width || cell.y < 0 || cell.y >= height) continue;
-            int flatIndex = cell.x + cell.y * width;
+            PreyPositions = preyPositions,
+            Speed = Ex3Config.PredatorSpeed
+        };
 
-            if (!preyGrid.ContainsKey(flatIndex))
-                preyGrid[flatIndex] = new NativeList<Entity>(Allocator.Temp);
-            preyGrid[flatIndex].Add(entity);
-        }
+        JobHandle preyHandle = preyJob.ScheduleParallel(state.Dependency);
+        JobHandle predatorHandle = predatorJob.ScheduleParallel(preyHandle);
+        predatorHandle.Complete();
 
-        float preySpeed = Ex3Config.PreySpeed;
-        float predatorSpeed = Ex3Config.PredatorSpeed;
+        plantTransforms.Dispose();
+        preyTransforms.Dispose();
+        plantPositions.Dispose();
+        preyPositions.Dispose();
+    }
 
-        foreach (var (vel, lt, entity) in SystemAPI.Query<RefRW<VelocityData>, RefRO<LocalTransform>>().WithAll<PreyTag>().WithEntityAccess())
+    [BurstCompile]
+    [WithAll(typeof(PreyTag))]
+    public partial struct MovePreyJob : IJobEntity
+    {
+        [ReadOnly] public NativeArray<float3> PlantPositions;
+        public float Speed;
+
+        public void Execute(ref VelocityData velocity, in LocalTransform transform)
         {
-            float3 pos = lt.ValueRO.Position;
+            float3 pos = transform.Position;
             float minDistSq = float.MaxValue;
             float3 target = pos;
 
-            int2 cell = (int2)math.floor(pos.xy / cellSize);
-
-            for (int dx = -1; dx <= 1; dx++)
-            for (int dy = -1; dy <= 1; dy++)
+            for (int i = 0; i < PlantPositions.Length; i++)
             {
-                int2 neighbor = cell + new int2(dx, dy);
-                if (neighbor.x < 0 || neighbor.x >= width || neighbor.y < 0 || neighbor.y >= height) continue;
-                int flatIndex = neighbor.x + neighbor.y * width;
-
-                if (plantGrid.TryGetValue(flatIndex, out var list))
+                float distSq = math.distancesq(pos, PlantPositions[i]);
+                if (distSq < minDistSq)
                 {
-                    for (int i = 0; i < list.Length; i++)
-                    {
-                        var other = list[i];
-                        float3 otherPos = transforms[other].Position;
-                        float distSq = math.distancesq(pos, otherPos);
-                        if (distSq < minDistSq)
-                        {
-                            minDistSq = distSq;
-                            target = otherPos;
-                        }
-                    }
+                    minDistSq = distSq;
+                    target = PlantPositions[i];
                 }
             }
 
-            vel.ValueRW.Value = (target - pos) * preySpeed;
+            velocity.Value = (target - pos) * Speed;
         }
+    }
 
-        foreach (var (vel, lt, entity) in SystemAPI.Query<RefRW<VelocityData>, RefRO<LocalTransform>>().WithAll<PredatorTag>().WithEntityAccess())
+    [BurstCompile]
+    [WithAll(typeof(PredatorTag))]
+    public partial struct MovePredatorJob : IJobEntity
+    {
+        [ReadOnly] public NativeArray<float3> PreyPositions;
+        public float Speed;
+
+        public void Execute(ref VelocityData velocity, in LocalTransform transform)
         {
-            float3 pos = lt.ValueRO.Position;
+            float3 pos = transform.Position;
             float minDistSq = float.MaxValue;
             float3 target = pos;
 
-            int2 cell = (int2)math.floor(pos.xy / cellSize);
-
-            for (int dx = -1; dx <= 1; dx++)
-            for (int dy = -1; dy <= 1; dy++)
+            for (int i = 0; i < PreyPositions.Length; i++)
             {
-                int2 neighbor = cell + new int2(dx, dy);
-                if (neighbor.x < 0 || neighbor.x >= width || neighbor.y < 0 || neighbor.y >= height) continue;
-                int flatIndex = neighbor.x + neighbor.y * width;
-
-                if (preyGrid.TryGetValue(flatIndex, out var list))
+                float distSq = math.distancesq(pos, PreyPositions[i]);
+                if (distSq < minDistSq)
                 {
-                    for (int i = 0; i < list.Length; i++)
-                    {
-                        var other = list[i];
-                        float3 otherPos = transforms[other].Position;
-                        float distSq = math.distancesq(pos, otherPos);
-                        if (distSq < minDistSq)
-                        {
-                            minDistSq = distSq;
-                            target = otherPos;
-                        }
-                    }
+                    minDistSq = distSq;
+                    target = PreyPositions[i];
                 }
             }
 
-            vel.ValueRW.Value = (target - pos) * predatorSpeed;
+            velocity.Value = (target - pos) * Speed;
         }
-
-        foreach (var kvp in plantGrid) kvp.Value.Dispose();
-        foreach (var kvp in preyGrid) kvp.Value.Dispose();
-        plantGrid.Dispose();
-        preyGrid.Dispose();
     }
 }

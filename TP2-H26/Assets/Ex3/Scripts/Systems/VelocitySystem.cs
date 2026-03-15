@@ -2,6 +2,7 @@ using Unity.Burst;
 using Unity.Entities;
 using Unity.Transforms;
 
+[BurstCompile]
 [UpdateInGroup(typeof(SimulationSystemGroup))]
 [UpdateBefore(typeof(LifetimeSystem))]
 public partial struct VelocitySystem : ISystem
@@ -9,11 +10,22 @@ public partial struct VelocitySystem : ISystem
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        float dt = SystemAPI.Time.DeltaTime;
-
-        foreach (var (lt, vel) in SystemAPI.Query<RefRW<LocalTransform>, RefRO<VelocityData>>())
+        var job = new VelocityJob
         {
-            lt.ValueRW.Position += vel.ValueRO.Value * dt;
+            DeltaTime = SystemAPI.Time.DeltaTime
+        };
+
+        state.Dependency = job.ScheduleParallel(state.Dependency);
+    }
+
+    [BurstCompile]
+    public partial struct VelocityJob : IJobEntity
+    {
+        public float DeltaTime;
+
+        public void Execute(ref LocalTransform transform, in VelocityData velocity)
+        {
+            transform.Position += velocity.Value * DeltaTime;
         }
     }
 }
